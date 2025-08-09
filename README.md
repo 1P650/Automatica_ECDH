@@ -1,1 +1,1 @@
-Diffie-Hellman via ECDH. 
+Diffie-Hellman via Elliptic Curves. 
