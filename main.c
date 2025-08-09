@@ -1,146 +1,124 @@
-/* ПОИСК ОБРАТНОГО ЭЛЕМЕНТА
- *
- * Поиск обратного элемента в поле GF(p) или Z/pZ
- *  * Предполагается, что модуль - ТОЛЬКО ПРОСТОЕ ЧИСЛО
- *  * Предполагается, что элемент приведен по модулю
- *  * На данный момент наибольший размер числа, так или иначе проверенный - 512 бит.
- *
- *
- * Реализация в большинстве случаев с помощью предложенной библиотеки
- * Для работы с большими числами - aripfm.h
- *
- * Реализованные алгоритмы для поиска обратного:
- * 1) Расширенный алгоритм Евклида
- * * функция - MULTINV_EGCD
- * 2) Расширенный Бинарный алгоритм Евклида (неоптимизированный)
- * * функция - MULTINV_EBGCD или MULTINV_EBGCD_constTime
- * 3) Малая теорема Ферма;
- * * функция через возведение в квадрат - MULTINV_FERMAT_SQPOW
- * * функция через умножение Монтгомери - MULTINV_FERMAT_MONPOW или MULTINV_FERMAT_MONPOW_OPT
- *
- */
-
- /* Составляющие программы:
- * * Файл main.c
- * * * Смена бенчмарка через указатель CURRBENCH
- * * * Смена алгоритма через указатель INVERSE
- * * * Функциональный тест через флаг CHECK_INV
- * * * Среднее время выполнения функции через флаг DO_BENCHMARK
- * *
- * * Файлы arifm.c, arifm.h - библиотека + модификации к ней
- * *
- * * Файлы multinv.c и multinv.h
- * * * Содержат реализации алгоритмов
- * *
- * * Файл montgomery.h
- * * * Содержит функции для умножения Монтгомери
- * *
- * * Файл benchmark.h
- * * * содержит тестовые вектора
- * * Файл hexutil.h
- * * * Пока содержит только функцию печати массива
- */
-
-
 #include <stdio.h>
-#include <time.h>
-
-#include "arifm.h"
 #include "multinv.h"
 #include "hexutil.h"
+#include "elliptic.h"
 
-#include "benchmark.h"
-
-// Проверка умножением на исходный
-#define CHECK_INV 1
-//Простой замер времени выполнения
-#define DO_BENCHMARK 0
-
-// Запуск бенчмарка
-void BENCHMARK_RUN(int (*INVERSE)(int, u32*, u32*, u32*), BENCHCASE *CURRBENCH, int CHECK_INVERSE, int MEASURE){
-    int f = INVERSE(CURRBENCH->MODLEN, CURRBENCH->ELEMENT, CURRBENCH->MODULO, CURRBENCH->RESULT);
-    printf("MODULO = ");
-    HEXUTIL_printHex(CURRBENCH->MODULO, CURRBENCH->MODLEN);
-    printf("ELEMENT = ");
-    HEXUTIL_printHex(CURRBENCH->ELEMENT, CURRBENCH->MODLEN);
-    printf("EXPECTED = ");
-    HEXUTIL_printHex(CURRBENCH->EXPECTED, CURRBENCH->MODLEN);
-    printf("RESULT = ");
-    HEXUTIL_printHex(CURRBENCH->RESULT, CURRBENCH->MODLEN);
-
-    if(CHECK_INVERSE){
-        unsigned int *MUL = malloc(sizeof(unsigned int) * CURRBENCH->MODLEN);
-        mulp(CURRBENCH->MODLEN, CURRBENCH->RESULT, CURRBENCH->ELEMENT, CURRBENCH->MODULO, MUL);
-        printf("\n\n[---CHECK INVERSE---]:\n\nELEM*RESULT = ");
-        HEXUTIL_printHex(MUL, CURRBENCH->MODLEN);
-        free(MUL);
-    }
-
-    if(MEASURE){
-        unsigned long long i = 0;
-        double sum = 0;
-
-        int REPETITIONS = 5;
-
-        for(int j = 0; j < REPETITIONS; ++j){
-            clock_t t1 = clock();
-            for(i = 0; ; ++i){
-                int f = INVERSE(CURRBENCH->MODLEN, CURRBENCH->ELEMENT, CURRBENCH->MODULO, CURRBENCH->RESULT);
-                clock_t t2 = clock();
-                double time_spent = (double)(t2 - t1) / CLOCKS_PER_SEC;
-                if(2 - time_spent < 0) break;
-
-            }
-            sum += i;
-        }
-
-        double q = (double) sum / REPETITIONS;
-
-
-
-        printf("\n\n[---MEAUSRE: TIME AVERAGE = %f ;---]\n\n",q);
-    }
-}
+#define MODLEN 8
 int main()
 {
-    const int (*ALGS[])(int, u32*, u32*, u32*) = {
-        MULTINV_EGCD,
-        MULTINV_EBGCD2 ,
-        MULTINV_FERMAT_SQPOW,
-        MULTINV_FERMAT_MONPOW
-    };
 
-    const char* ALGNAMES []= {
-        "EGCD",
-        "BINARY EGCD",
-        "FERMAT SQPOW",
-        "FERMAT MONTGOMERY"
-    };
-
-    const BENCHCASE *BENCHCASES[] = {
-        &BENCH_2_5,
-        &BENCH_13_17,
-        &BENCH_725_51971,
-        &BENCH_ECC_256,
-        &BENCH_SHORT_256,
-        &BENCH_ECC_512
-    };
-
-    BENCHCASE *CURRBENCH;
-    int ALGS_COUNT = sizeof(ALGS)/sizeof(ALGS[0]);
-    int BENCH_COUNT = sizeof(BENCHCASES)/sizeof(BENCHCASES[0]);
-
-    for(int i = 0; i < ALGS_COUNT; ++i){
-        printf("\n\n[!!!------RUNNING BENCHS FOR %s------!!!]\n\n", ALGNAMES[i]);
-        for(int j = 0; j< BENCH_COUNT; ++j){
-            printf("\n[----RUNNING BENCH: %s----]\n", BENCHCASES[j]->BENCHNAME);
-            BENCHMARK_RUN(ALGS[i], BENCHCASES[j], CHECK_INV, DO_BENCHMARK);
-        }
-    }
+    //Модуль эллиптической кривой - взят из ГОСТ
+    u32 MODULE [MODLEN] = {0x00000431, 0x00000000, 0x00000000, 0x00000000,
+                     0x00000000, 0x00000000, 0x00000000, 0x80000000 };
+    //Коэффициент a эллиптической кривой (y^2 = x^3 + ax + b) (ГОСТ)
+    u32 A[MODLEN] = { 7, 0x0, 0x0, 0x0,0x0, 0x0, 0x0, 0x0 };
 
 
+    //Точка P эллиптической кривой (ГОСТ)
+    u32 P_X[MODLEN] = {2,0,0,0,0,0,0,0};
+    u32 P_Y[MODLEN] = {0xEA7E8FC8, 0x2B96ABBC, 0x9CA26712, 0x85C97F0A, 0x0E16D19C, 0xBD631603, 0xE65147D4, 0x08E2A8A0};
 
 
+    // Номер варианта
+    unsigned int t = 11;
+
+    // x = 2^64 + 2^32 + t;   y = 2^65 + 2^31 + t
+    //Закрытый ключ абонента А (x)
+    u32 A_SecretKey[MODLEN] = {t, 1, 1};
+    //Публичный ключ абонента A (= x*P)
+    u32 A_PublicKey_X[MODLEN] = {0};
+    u32 A_PublicKey_Y[MODLEN] = {0};
+
+    //Общий ключ абонента A (нужен y*P)
+    u32 A_SharedKey_X[MODLEN] = {0};
+    u32 A_SharedKey_Y[MODLEN] = {0};
+
+    //Закрытый ключ абонента B (y)
+    u32 B_SecretKey[MODLEN] = {0x80000000 | t, 0, 2};
+    //Публичный ключ абонента B (= y*P)
+    u32 B_PublicKey_X[MODLEN] = {0};
+    u32 B_PublicKey_Y[MODLEN] = {0};
+
+    //Общий ключ абонента B (нужен x*P)
+    u32 B_SharedKey_X[MODLEN] = {0};
+    u32 B_SharedKey_Y[MODLEN] = {0};
+
+
+    //Часть параметров эллиптической кривой
+    CurveParams PARAMS = {A, MODLEN, MODULE};
+
+
+    //Вывод параметров
+
+    printf("Program params:\n");
+    printf("Variant: %d\n", t);
+    printf("Module: ");
+    HEXUTIL_printHexLine(MODULE, MODLEN);
+    printf("Coefficient A: ");
+    HEXUTIL_printHexLine(A, MODLEN);
+    printf("P point of elliptic curve (generator):\n");
+    printf("P_X: ");
+    HEXUTIL_printHexLine(P_X, MODLEN);
+    printf("P_Y: ");
+    HEXUTIL_printHexLine(P_Y, MODLEN);
+    printf("\n----------------\n");
+    printf("DIFFIE HELLMAN:");
+    printf("\n----------------\n");
+    //Проткол Диффи-Хеллмана
+    printf("Alice secret key: ");
+    HEXUTIL_printHexLine(A_SecretKey, MODLEN);
+
+    printf("Alice public key:\n");
+    //Вычисление x*P
+    ELLIPTIC_MULNP(PARAMS, P_X, P_Y, A_SecretKey, A_PublicKey_X, A_PublicKey_Y);
+
+    printf("A_X: ");
+    HEXUTIL_printHexLine(A_PublicKey_X, MODLEN);
+    printf("A_Y: ");
+    HEXUTIL_printHexLine(A_PublicKey_Y, MODLEN);
+
+    printf("Bob gets Alice public key.\n");
+    printf("Bob calculates secret shared key:\n");
+
+    //Вычисленеи y*(x*P)
+    ELLIPTIC_MULNP(PARAMS, A_PublicKey_X, A_PublicKey_Y, B_SecretKey, B_SharedKey_X, B_SharedKey_Y);
+
+    printf("Bob SharedKey_X: ");
+    HEXUTIL_printHexLine(B_SharedKey_X, MODLEN);
+    printf("Bob SharedKey_Y: ");
+    HEXUTIL_printHexLine(B_SharedKey_Y, MODLEN);
+
+    printf("\n----------------\n");
+
+    printf("Bob secret key: ");
+    HEXUTIL_printHexLine(B_SecretKey, MODLEN);
+
+    printf("Bob public key:\n");
+    //Вычисление y*P
+    ELLIPTIC_MULNP(PARAMS, P_X, P_Y, B_SecretKey, B_PublicKey_X, B_PublicKey_Y);
+
+    printf("B_X: ");
+    HEXUTIL_printHexLine(B_PublicKey_X, MODLEN);
+    printf("B_Y: ");
+    HEXUTIL_printHexLine(B_PublicKey_Y, MODLEN);
+
+    printf("Alice gets Alice public key.\n");
+    printf("Alice calculates secret shared key:\n");
+
+    //Вычисление x*(y*P)
+    ELLIPTIC_MULNP(PARAMS, B_PublicKey_X, B_PublicKey_Y, A_SecretKey, A_SharedKey_X, A_SharedKey_Y);
+
+    printf("Alice SharedKey_X: ");
+    HEXUTIL_printHexLine(A_SharedKey_X, MODLEN);
+    printf("Alice SharedKey_Y: ");
+    HEXUTIL_printHexLine(A_SharedKey_Y, MODLEN);
+
+    printf("\n----------------\n");
+    printf("SHARED KEY IS:\n");
+    printf("SharedKey_X: ");
+    HEXUTIL_printHexLine(A_SharedKey_X, MODLEN);
+    printf("SharedKey_Y: ");
+    HEXUTIL_printHexLine(B_SharedKey_Y, MODLEN);
 
     return 0;
 }
